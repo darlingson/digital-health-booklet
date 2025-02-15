@@ -1,0 +1,21 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "digital_health_passport_api", "digital_health_passport_api.csproj", "{73192E4F-317E-4EB2-AD9A-6042F0434816}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{ED76CD0E-3A3C-4C1E-A311-E7341F071AA9}"
+	ProjectSection(SolutionItems) = preProject
+		compose.yaml = compose.yaml
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{73192E4F-317E-4EB2-AD9A-6042F0434816}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{73192E4F-317E-4EB2-AD9A-6042F0434816}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{73192E4F-317E-4EB2-AD9A-6042F0434816}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{73192E4F-317E-4EB2-AD9A-6042F0434816}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,6 @@
+﻿services:
+  digital_health_passport_api:
+    image: digital_health_passport_api
+    build:
+      context: .
+      dockerfile: Dockerfile

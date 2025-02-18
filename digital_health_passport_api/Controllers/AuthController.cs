@@ -17,108 +17,188 @@ namespace digital_health_passport_api.Controllers
     {
         private readonly IConfiguration _config;
         private readonly ApplicationDbContext _context;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(IConfiguration config, ApplicationDbContext context)
+        public AuthController(IConfiguration config, ApplicationDbContext context, ILogger<AuthController> logger)
         {
             _config = config;
             _context = context;
+            _logger = logger;
         }
 
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
         {
-            if (await _context.Users.AnyAsync(u => u.Email == registerDto.Email))
+            try
             {
-                return BadRequest("Email already exists");
-            }
-
-            var user = new User
-            {
-                Id = Guid.NewGuid(),
-                Email = registerDto.Email,
-                Name = registerDto.Name,
-                PasswordHash = HashPassword(registerDto.Password),
-                Role = registerDto.Role,
-                ProfessionalId = registerDto.ProfessionalId
-            };
-
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
-
-            var token = GenerateToken(user);
-            return Ok(new
-            {
-                token,
-                user = new
+                if (registerDto == null)
                 {
-                    id = user.Id,
-                    email = user.Email,
-                    name = user.Name,
-                    role = user.Role,
-                    professionalId = user.ProfessionalId
+                    return BadRequest("Registration data is required");
                 }
-            });
+
+                // Validate required fields
+                if (string.IsNullOrWhiteSpace(registerDto.Email) || 
+                    string.IsNullOrWhiteSpace(registerDto.Password) ||
+                    string.IsNullOrWhiteSpace(registerDto.Name))
+                {
+                    return BadRequest("Email, password, and name are required fields");
+                }
+
+                // Check if email exists
+                if (await _context.Users.AnyAsync(u => u.Email == registerDto.Email))
+                {
+                    return Conflict("Email already exists");
+                }
+
+                var user = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Email = registerDto.Email,
+                    Name = registerDto.Name,
+                    PasswordHash = HashPassword(registerDto.Password),
+                    Role = registerDto.Role,
+                    ProfessionalId = registerDto.ProfessionalId
+                };
+
+                await _context.Users.AddAsync(user);
+                await _context.SaveChangesAsync();
+
+                var token = await GenerateToken(user);
+                
+                return Ok(new
+                {
+                    token,
+                    user = new
+                    {
+                        id = user.Id,
+                        email = user.Email,
+                        name = user.Name,
+                        role = user.Role,
+                        professionalId = user.ProfessionalId
+                    }
+                });
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogError(ex, "Database error occurred while registering user: {Email}", registerDto.Email);
+                return StatusCode(500, "An error occurred while saving the user");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error occurred during registration for user: {Email}", registerDto.Email);
+                return StatusCode(500, "An unexpected error occurred");
+            }
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.Email == loginDto.Email);
-
-            if (user == null || !VerifyPassword(loginDto.Password, user.PasswordHash))
+            try
             {
-                return BadRequest("Invalid credentials");
-            }
-
-            var token = GenerateToken(user);
-            return Ok(new
-            {
-                token,
-                user = new
+                if (loginDto == null)
                 {
-                    id = user.Id,
-                    email = user.Email,
-                    name = user.Name,
-                    role = user.Role,
-                    professionalId = user.ProfessionalId
+                    return BadRequest("Login data is required");
                 }
-            });
+
+                if (string.IsNullOrWhiteSpace(loginDto.Email) || 
+                    string.IsNullOrWhiteSpace(loginDto.Password))
+                {
+                    return BadRequest("Email and password are required");
+                }
+
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Email == loginDto.Email);
+
+                if (user == null || !VerifyPassword(loginDto.Password, user.PasswordHash))
+                {
+                    return BadRequest("Invalid email or password");
+                }
+
+                var token = await GenerateToken(user);
+                
+                return Ok(new
+                {
+                    token,
+                    user = new
+                    {
+                        id = user.Id,
+                        email = user.Email,
+                        name = user.Name,
+                        role = user.Role,
+                        professionalId = user.ProfessionalId
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred during login for user: {Email}", loginDto.Email);
+                return StatusCode(500, "An error occurred during login");
+            }
         }
 
         private string HashPassword(string password)
         {
-            using var sha256 = SHA256.Create();
-            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-            return Convert.ToBase64String(hashedBytes);
+            try
+            {
+                using var sha256 = SHA256.Create();
+                var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+                return Convert.ToBase64String(hashedBytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred while hashing password");
+                throw new InvalidOperationException("Error processing password", ex);
+            }
         }
 
         private bool VerifyPassword(string password, string hash)
         {
-            return HashPassword(password) == hash;
+            try
+            {
+                return HashPassword(password) == hash;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred while verifying password");
+                throw new InvalidOperationException("Error verifying password", ex);
+            }
         }
 
-        private string GenerateToken(User user)
+        private async Task<string> GenerateToken(User user)
         {
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-            var claims = new[]
+            try
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(ClaimTypes.Email, user.Email),
-                new Claim(ClaimTypes.Role, user.Role),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
+                var key = _config["Jwt:Key"];
+                if (string.IsNullOrEmpty(key))
+                {
+                    throw new InvalidOperationException("JWT key is not configured");
+                }
 
-            var token = new JwtSecurityToken(
-                issuer: _config["Jwt:Issuer"],
-                audience: _config["Jwt:Issuer"],
-                claims: claims,
-                expires: DateTime.Now.AddHours(24),
-                signingCredentials: credentials);
+                var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+                var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-            return new JwtSecurityTokenHandler().WriteToken(token);
+                var claims = new[]
+                {
+                    new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                    new Claim(ClaimTypes.Email, user.Email),
+                    new Claim(ClaimTypes.Role, user.Role),
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                };
+
+                var token = new JwtSecurityToken(
+                    issuer: _config["Jwt:Issuer"],
+                    audience: _config["Jwt:Issuer"],
+                    claims: claims,
+                    expires: DateTime.Now.AddHours(24),
+                    signingCredentials: credentials);
+
+                return new JwtSecurityTokenHandler().WriteToken(token);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating JWT token for user: {UserId}", user.Id);
+                throw new InvalidOperationException("Error generating authentication token", ex);
+            }
         }
     }
 }

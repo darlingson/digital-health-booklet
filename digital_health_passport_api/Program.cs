@@ -1,6 +1,9 @@
 using System.Text;
+using digital_health_passport_api;
 using Microsoft.EntityFrameworkCore;
 using digital_health_passport_api.Data;
+using digital_health_passport_api.Models.Converters;
+using digital_health_passport_api.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
@@ -35,10 +38,15 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("RequireAdministratorRole",
         policy => policy.RequireRole("Administrator"));
 });
-
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new DateOnlyJsonConverter());
+});
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddScoped<IPatientRepository, PatientRepository>();
 
 var app = builder.Build();
 

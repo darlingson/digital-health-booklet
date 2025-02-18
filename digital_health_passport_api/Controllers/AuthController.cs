@@ -1,45 +1,101 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
-namespace digital_health_passport_api.Controllers;
+using digital_health_passport_api.Data;
+using digital_health_passport_api.Data.Entities;
+using digital_health_passport_api.Models.Dtos;
 
-[Route("api/[controller]")]
+namespace digital_health_passport_api.Controllers
+{
+    [Route("api/[controller]")]
     [ApiController]
     public class AuthController : ControllerBase
     {
         private readonly IConfiguration _config;
+        private readonly ApplicationDbContext _context;
 
-        public AuthController(IConfiguration config)
+        public AuthController(IConfiguration config, ApplicationDbContext context)
         {
             _config = config;
+            _context = context;
+        }
+
+        [HttpPost("register")]
+        public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
+        {
+            if (await _context.Users.AnyAsync(u => u.Email == registerDto.Email))
+            {
+                return BadRequest("Email already exists");
+            }
+
+            var user = new User
+            {
+                Id = Guid.NewGuid(),
+                Email = registerDto.Email,
+                Name = registerDto.Name,
+                PasswordHash = HashPassword(registerDto.Password),
+                Role = registerDto.Role,
+                ProfessionalId = registerDto.ProfessionalId
+            };
+
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+
+            var token = GenerateToken(user);
+            return Ok(new
+            {
+                token,
+                user = new
+                {
+                    id = user.Id,
+                    email = user.Email,
+                    name = user.Name,
+                    role = user.Role,
+                    professionalId = user.ProfessionalId
+                }
+            });
         }
 
         [HttpPost("login")]
-        public IActionResult Login([FromBody] UserLogin userLogin)
+        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
-            var user = Authenticate(userLogin);
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.Email == loginDto.Email);
 
-            if (user != null)
+            if (user == null || !VerifyPassword(loginDto.Password, user.PasswordHash))
             {
-                var token = GenerateToken(user);
-                return Ok(new { token });
+                return BadRequest("Invalid credentials");
             }
 
-            return NotFound("User not found");
+            var token = GenerateToken(user);
+            return Ok(new
+            {
+                token,
+                user = new
+                {
+                    id = user.Id,
+                    email = user.Email,
+                    name = user.Name,
+                    role = user.Role,
+                    professionalId = user.ProfessionalId
+                }
+            });
         }
 
-        private User Authenticate(UserLogin userLogin)
+        private string HashPassword(string password)
         {
-            // Validate the User Credentials
-            // For demo purposes, this is hardcoded; you should retrieve from a database
-            if (userLogin.Username == "test" && userLogin.Password == "password")
-            {
-                return new User { Name = "Test User", Role = "Administrator" };
-            }
+            using var sha256 = SHA256.Create();
+            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+            return Convert.ToBase64String(hashedBytes);
+        }
 
-            return null;
+        private bool VerifyPassword(string password, string hash)
+        {
+            return HashPassword(password) == hash;
         }
 
         private string GenerateToken(User user)
@@ -49,7 +105,8 @@ namespace digital_health_passport_api.Controllers;
 
             var claims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Name),
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(ClaimTypes.Email, user.Email),
                 new Claim(ClaimTypes.Role, user.Role),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
@@ -58,21 +115,10 @@ namespace digital_health_passport_api.Controllers;
                 issuer: _config["Jwt:Issuer"],
                 audience: _config["Jwt:Issuer"],
                 claims: claims,
-                expires: DateTime.Now.AddMinutes(120),
+                expires: DateTime.Now.AddHours(24),
                 signingCredentials: credentials);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
-
-    public class UserLogin
-    {
-        public string Username { get; set; }
-        public string Password { get; set; }
-    }
-
-    public class User
-    {
-        public string Name { get; set; }
-        public string Role { get; set; }
-    }
+}
